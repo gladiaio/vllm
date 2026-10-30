@@ -82,5 +82,12 @@ def init_speculator(
         )
 
         return NgramGPUSpeculator(vllm_config, device, req_states)
+    elif speculative_config.method == "custom_class":
+        # A Model Runner V2 speculator of the user's (config.vllm.custom_proposer_is_gpu).
+        import importlib
+
+        module_path, class_name = speculative_config.model.rsplit(".", 1)
+        cls = getattr(importlib.import_module(module_path), class_name)
+        return cls(vllm_config, device, req_states)
     else:
         raise NotImplementedError(f"{speculative_config.method} is not supported yet.")

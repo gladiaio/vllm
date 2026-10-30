@@ -1230,6 +1230,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if scheduler_output.scheduled_new_reqs:
             self.req_states.apply_staged_writes()
             self.model_state.apply_staged_writes()
+            # A custom speculator may keep per-request state (e.g. drafts from
+            # SamplingParams.extra_args): it gets the new requests once their
+            # request-state index is set.
+            add_to_speculator = getattr(self.speculator, "add_requests", None)
+            if add_to_speculator is not None:
+                add_to_speculator(scheduler_output.scheduled_new_reqs)
         if self.sampler is not None:
             self.sampler.apply_staged_writes()
 

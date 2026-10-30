@@ -337,6 +337,26 @@ OPTIMIZATION_LEVEL_TO_CONFIG = {
 }
 
 
+def custom_proposer_is_gpu(speculative_config: "SpeculativeConfig | None") -> bool:
+    """Whether a ``custom_class`` proposer is a Model Runner V2 speculator: its class sets
+    ``supports_model_runner_v2 = True`` and is built with ``(vllm_config, device,
+    req_states)``, its drafts computed on the GPU from the step's tensors (no host sync), so
+    async scheduling and Model Runner V2 stay on, as with ``ngram_gpu``."""
+    if speculative_config is None or speculative_config.method != "custom_class":
+        return False
+    path = speculative_config.model
+    if not path or "." not in path:
+        return False
+    import importlib
+
+    module_path, class_name = path.rsplit(".", 1)
+    try:
+        cls = getattr(importlib.import_module(module_path), class_name, None)
+    except ImportError:
+        return False
+    return bool(getattr(cls, "supports_model_runner_v2", False))
+
+
 @config(config=ConfigDict(arbitrary_types_allowed=True))
 class VllmConfig:
     """Dataclass which contains all vllm-related configuration. This
@@ -1567,6 +1587,7 @@ class VllmConfig:
                     and self.speculative_config.method != "draft_model"
                     and self.speculative_config.method != "dspark"
                     and self.speculative_config.method != "dflash"
+                    and not custom_proposer_is_gpu(self.speculative_config)
                 ):
                     raise ValueError(
                         "Currently, async scheduling is only supported "
@@ -1601,6 +1622,7 @@ class VllmConfig:
                 and self.speculative_config.method != "draft_model"
                 and self.speculative_config.method != "dspark"
                 and self.speculative_config.method != "dflash"
+                and not custom_proposer_is_gpu(self.speculative_config)
             ):
                 logger.warning_once(
                     "Async scheduling not supported with %s-based "
@@ -2930,7 +2952,7 @@ class VllmConfig:
                 "medusa",
                 "mlp_speculator",
                 "custom_class",
-            ):
+            ) and not custom_proposer_is_gpu(speculative_config):
                 unsupported.append(f"speculative method '{speculative_config.method}'")
 
             # V2 EagleSpeculator does not support parallel_drafting (for P-Eagle).
