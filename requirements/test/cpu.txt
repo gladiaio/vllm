@@ -4,7 +4,7 @@ abi3info==2025.11.29
     # via torch-abi-audit
 absl-py==2.1.0
     # via rouge-score
-accelerate==1.13.0
+accelerate==1.15.0
     # via peft
 aiohappyeyeballs==2.6.1
     # via aiohttp
@@ -72,7 +72,7 @@ azure-storage-blob==12.28.0
     # via runai-model-streamer-azure
 backoff==2.2.1
     # via -r requirements/test/cuda.in
-black==26.5.1
+black==26.10.1
     # via
     #   -r requirements/test/cuda.in
     #   datamodel-code-generator
@@ -166,7 +166,7 @@ dataproperty==1.0.1
     # via
     #   pytablewriter
     #   tabledata
-datasets==3.3.0
+datasets==5.1.0
     # via
     #   -r requirements/test/cuda.in
     #   evaluate
@@ -195,7 +195,7 @@ distro==1.9.0
     # via
     #   anthropic
     #   openai
-dnspython==2.7.0
+dnspython==2.9.0
     # via email-validator
 docker==7.2.0
     # via gpt-oss
@@ -240,7 +240,7 @@ fastparquet==2024.11.0
     # via genai-perf
 fastsafetensors==0.3.3
     # via -r requirements/test/cuda.in
-filelock==4.0.7
+filelock==4.2.1
     # via
     #   -r requirements/test/../common.txt
     #   blobfile
@@ -260,7 +260,7 @@ frozenlist==1.5.0
     # via
     #   aiohttp
     #   aiosignal
-fsspec==2024.12.0
+fsspec==2026.6.0
     # via
     #   datasets
     #   evaluate
@@ -301,7 +301,7 @@ googleapis-common-protos==1.70.0
     #   opentelemetry-exporter-otlp-proto-http
 gpt-oss==0.0.9
     # via -r requirements/test/cuda.in
-graphql-core==3.2.6
+graphql-core==3.2.12
     # via hypothesis-graphql
 greenlet==3.2.3
     # via sqlalchemy
@@ -524,7 +524,7 @@ msal==1.39.0
     #   msal-extensions
 msal-extensions==1.3.1
     # via azure-identity
-msgpack==1.2.3
+msgpack==1.2.4
     # via
     #   -r requirements/test/cuda.in
     #   librosa
@@ -550,7 +550,7 @@ networkx==3.2.1
     #   torch
 ninja==1.13.0
     # via -r requirements/test/../common.txt
-nltk==3.10.3
+nltk==3.10.4
     # via
     #   -r requirements/test/cuda.in
     #   rouge-score
@@ -1066,7 +1066,7 @@ sentry-sdk==2.63.0
     # via fastapi-cloud-cli
 setproctitle==1.3.7
     # via -r requirements/test/../common.txt
-setuptools==80.10.2
+setuptools==84.1.0
     # via
     #   -r requirements/test/../common.txt
     #   model-hosting-container-standards
@@ -1203,7 +1203,7 @@ torchvision==0.29.0+cpu
     #   open-clip-torch
     #   segmentation-models-pytorch
     #   timm
-tornado==6.5.10
+tornado==6.6
     # via jupyter-client
 tqdm==4.67.3
     # via
@@ -1336,7 +1336,7 @@ uvloop==0.22.1
     # via uvicorn
 vector-quantize-pytorch==1.21.2
     # via -r requirements/test/cuda.in
-virtualenv==21.14.0
+virtualenv==21.14.13
     # via
     #   -r requirements/test/cuda.in
     #   ray
