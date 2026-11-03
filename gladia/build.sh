@@ -34,7 +34,9 @@ if command -v apt-get >/dev/null && [ "$(id -u)" = 0 ]; then
   log "system packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends git curl ca-certificates ccache >/dev/null
+  # libdw-dev (DeepGEMM's JIT: elfutils/libdwfl.h), libibverbs-dev: upstream's build image has
+  # elfutils-devel and rdma-core-devel (docker/Dockerfile)
+  apt-get install -y -qq --no-install-recommends git curl ca-certificates ccache libdw-dev libibverbs-dev >/dev/null
 fi
 
 if ! command -v uv >/dev/null; then
