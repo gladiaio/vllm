@@ -12,6 +12,11 @@ at, never skipped silently.
    does not have, while CMakeLists.txt builds it from CUDA 12.0. Below 12.8 it is left out, as
    upstream does when no target architecture fits it (VLLM_ENABLE_COOPERATIVE_TOPK unset: the op
    is not registered). None of Gladia's engines runs a DSA indexer model.
+2. FA3 (vllm-flash-attn's Hopper kernels, `_vllm_fa3_C`): nvcc 12.6.3 segfaults on
+   hopper/instantiations/flash_fwd_hdim128_bf16_paged_split_softcap_sm90.cu (deterministic, at the
+   vllm-flash-attn commit v0.33.0 pins); upstream only builds it with CUDA 12.9 / 13 now. Below 12.8
+   setup.py no longer asks for it (it already leaves it out below 12.3): vLLM's backend selection
+   (`is_fa_version_supported(3)`) and solaria-4's then run FA2 on Hopper, from its compute_80 PTX.
 """
 
 from __future__ import annotations
@@ -45,9 +50,28 @@ def cooperative_topk(src: Path, nvcc: tuple[int, int]) -> str:
     return "cooperative_topk: left out below CUDA 12.8 (CMakeLists.txt gate 12.0 -> 12.8)"
 
 
+FA3_GATE = """    if USE_PRECOMPILED_EXTENSIONS or (
+        CUDA_HOME and get_nvcc_cuda_version() >= Version("12.3")
+    ):"""
+
+
+def fa3(src: Path, nvcc: tuple[int, int]) -> str:
+    if nvcc >= (12, 8):
+        return "fa3: CUDA >= 12.8, unchanged"
+    setup = src / "setup.py"
+    text = setup.read_text()
+    patched = FA3_GATE.replace('Version("12.3")', 'Version("12.8")')
+    if patched in text:
+        return "fa3: already left out below CUDA 12.8"
+    if FA3_GATE not in text:
+        raise SystemExit("fa3: setup.py's _vllm_fa3_C gate changed upstream: look at it again")
+    setup.write_text(text.replace(FA3_GATE, patched, 1))
+    return "fa3: left out below CUDA 12.8 (setup.py gate 12.3 -> 12.8; Hopper runs FA2)"
+
+
 def main() -> int:
     src, nvcc = Path(sys.argv[1]), version(sys.argv[2])
-    for change in (cooperative_topk,):
+    for change in (cooperative_topk, fa3):
         print(f"patch: {change(src, nvcc)}")
     return 0
 
