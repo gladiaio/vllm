@@ -51,7 +51,7 @@ attestation from this workflow (GitHub artifact attestations, Sigstore). Check i
 Install it on the torch it was built against (pin the sha256 from `SHA256SUMS`):
 
     uv pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.14.0 torchvision==0.29.0 torchaudio==2.11.0
-    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.2/vllm-0.33.0%2Bcu126.gladia2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=<SHA256SUMS>"
+    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.2/vllm-0.33.0%2Bcu126.gladia2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=c88a48663cbd4308d23c11a762bcc4fb8f49c77059216163c1c32ba32b8e5ad2"
 
 Rebuild: bump `REV` in the workflow when `gladia/` changes, then run it
 (`gh workflow run release.yml -R gladiaio/vllm`, or `-f version=0.33.1`, or `-f force=true` to replace
