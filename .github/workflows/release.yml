@@ -95,6 +95,14 @@ jobs:
             /usr/local/share/boost /usr/local/.ghcup /opt/microsoft /usr/share/swift
           sudo docker image prune -af >/dev/null
           df -h /
+      # 16 GB of RAM: one nvcc of the CUTLASS / Machete sm90 kernels takes several GB, four were
+      # OOM-killed (exit 137); 3 jobs and a swap file absorb the peaks
+      - name: Swap
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 24G /swapfile2 && sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2 >/dev/null && sudo swapon /swapfile2
+          free -g
       # ccache across runs: a REV bump or a patch release recompiles only what changed
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
@@ -108,7 +116,7 @@ jobs:
           mkdir -p ccache dist
           start=$SECONDS
           docker run --rm -e VLLM_VERSION -e CUDA_VARIANT -e REV -e TORCH_CUDA_ARCH_LIST \
-            -e MAX_JOBS=4 -e NVCC_THREADS=1 -e CCACHE_DIR=/ccache -e CCACHE_MAXSIZE=8G \
+            -e MAX_JOBS=3 -e NVCC_THREADS=1 -e CCACHE_DIR=/ccache -e CCACHE_MAXSIZE=8G \
             -v "$PWD/src:/src" -v "$PWD/dist:/out" -v "$PWD/ccache:/ccache" -v "$PWD/gladia-src/gladia:/gladia:ro" \
             "$IMAGE" bash /gladia/build.sh /src /out
           echo "built in $(( (SECONDS - start) / 60 )) min"
