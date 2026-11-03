@@ -1,0 +1,193 @@
+name: Sync and release
+
+# Every day: mirror upstream main into main, then build the latest upstream vLLM release from source
+# for CUDA 12 (gladia/build.sh, the settings in gladia/cuda12.env) unless that build is released.
+# Upstream ships CUDA 13 wheels only since 0.33.0 (vllm-project/vllm#62575). See README.md.
+on:
+  schedule:
+    - cron: "11 0 * * *"  # 00:11 UTC: the build takes hours, done before gladia-enterprise's nightly image scan (03:17)
+  workflow_dispatch:
+    inputs:
+      version:
+        description: upstream version to build (default PyPI's latest release), e.g. 0.33.0
+        required: false
+      force:
+        description: rebuild and replace the release when it exists
+        type: boolean
+        default: false
+      dry_run:
+        description: build and check, publish nothing (even when released)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  REV: "1"                 # bump when gladia/ changes: rebuilds the current upstream release
+  TRIVY_VERSION: "0.75.0"
+  TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
+  PIP_AUDIT_VERSION: "2.10.1"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync main with upstream
+    runs-on: ubuntu-latest
+    steps:
+      # GITHUB_TOKEN cannot update .github/workflows: when upstream changed one, the merge needs
+      # SYNC_TOKEN (a token with the workflow scope on this repository)
+      - env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+        run: gh api -X POST "repos/${GITHUB_REPOSITORY}/merge-upstream" -f branch=main
+
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      build: ${{ steps.plan.outputs.build }}
+      torch: ${{ steps.plan.outputs.torch }}
+      torchvision: ${{ steps.plan.outputs.torchvision }}
+      torchaudio: ${{ steps.plan.outputs.torchaudio }}
+      cuda_variant: ${{ steps.plan.outputs.cuda_variant }}
+      toolkit: ${{ steps.plan.outputs.toolkit }}
+      archs: ${{ steps.plan.outputs.archs }}
+      local_version: ${{ steps.plan.outputs.local_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force || inputs.dry_run }}
+        run: |
+          gladia/plan.sh "${VERSION}" "${REV}" "${FORCE:-false}" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ needs.plan.outputs.local_version }}
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      IMAGE: nvidia/cuda:${{ needs.plan.outputs.toolkit }}-cudnn-devel-ubuntu24.04
+      VLLM_VERSION: ${{ needs.plan.outputs.version }}
+      CUDA_VARIANT: ${{ needs.plan.outputs.cuda_variant }}
+      TORCH_CUDA_ARCH_LIST: ${{ needs.plan.outputs.archs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: gladia-src
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: vllm-project/vllm
+          ref: v${{ needs.plan.outputs.version }}
+          path: src
+      # the CUDA devel image and the build need ~40 GB: drop the runner's preinstalled toolchains
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost /usr/local/.ghcup /opt/microsoft /usr/share/swift
+          sudo docker image prune -af >/dev/null
+          df -h /
+      # ccache across runs: a REV bump or a patch release recompiles only what changed
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ccache
+          key: ccache-${{ needs.plan.outputs.cuda_variant }}-${{ needs.plan.outputs.version }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ needs.plan.outputs.cuda_variant }}-${{ needs.plan.outputs.version }}-
+            ccache-${{ needs.plan.outputs.cuda_variant }}-
+      - name: Build the wheel
+        run: |
+          mkdir -p ccache dist
+          start=$SECONDS
+          docker run --rm -e VLLM_VERSION -e CUDA_VARIANT -e REV -e TORCH_CUDA_ARCH_LIST \
+            -e MAX_JOBS=4 -e NVCC_THREADS=1 -e CCACHE_DIR=/ccache -e CCACHE_MAXSIZE=8G \
+            -v "$PWD/src:/src" -v "$PWD/dist:/out" -v "$PWD/ccache:/ccache" -v "$PWD/gladia-src/gladia:/gladia:ro" \
+            "$IMAGE" bash /gladia/build.sh /src /out
+          echo "built in $(( (SECONDS - start) / 60 )) min"
+          sudo chown -R "$(id -u)" dist ccache
+      - name: Check the wheel
+        env:
+          TORCH: ${{ needs.plan.outputs.torch }}
+        run: |
+          # metadata, version and the device code of every extension (cuobjdump of the toolkit)
+          docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/gladia-src/gladia:/gladia:ro" "$IMAGE" bash -c '
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 >/dev/null &&
+            python3 /gladia/check_wheel.py /dist/*.whl --version "$0" --cuda-variant "$1" --rev "$2" \
+              --torch "$3" --archs "$4"' "$VLLM_VERSION" "$CUDA_VARIANT" "$REV" "$TORCH" "$TORCH_CUDA_ARCH_LIST"
+          # it installs on its torch and imports (no GPU here: import and version only)
+          python3 -m venv /tmp/v
+          /tmp/v/bin/pip install -q "torch==${TORCH}" --index-url "https://download.pytorch.org/whl/${CUDA_VARIANT}"
+          /tmp/v/bin/pip install -q dist/*.whl
+          /tmp/v/bin/python -c "import torch, vllm; print('vllm', vllm.__version__, 'torch', torch.__version__); assert vllm.__version__ == '${{ needs.plan.outputs.local_version }}'; assert torch.version.cuda.startswith('12.'), torch.version.cuda"
+          /tmp/v/bin/pip check || true  # report only: vLLM's optional extras are not all installed here
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wheel-${{ needs.plan.outputs.cuda_variant }}
+          path: dist/*.whl
+          compression-level: 0
+
+  release:
+    name: Scan and release
+    needs: [plan, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      # Trivy is a release binary checked against its sha256 (the aquasecurity/trivy-action tags were
+      # hijacked in 2026-03), as gladia-enterprise's .github/actions/trivy-scan does
+      - name: Trivy gate (fixable HIGH / CRITICAL)
+        run: |
+          curl -fsSL --proto '=https' --retry 3 -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          for whl in dist/*.whl; do
+            d="unpacked/$(basename "$whl" .whl)"
+            mkdir -p "$d" && python3 -m zipfile -e "$whl" "$d"
+          done
+          /tmp/trivy rootfs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 unpacked
+      # the version gladia-enterprise's pip-audit gate will see (OSV keys on the upstream version)
+      - name: pip-audit (the upstream version)
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          python3 -m venv /tmp/audit && /tmp/audit/bin/pip install -q "pip-audit==${PIP_AUDIT_VERSION}"
+          echo "vllm==${VERSION}" > /tmp/vllm.txt
+          /tmp/audit/bin/pip-audit --no-deps --disable-pip --vulnerability-service osv -r /tmp/vllm.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          LOCAL: ${{ needs.plan.outputs.local_version }}
+          TORCH: ${{ needs.plan.outputs.torch }}
+          TORCHVISION: ${{ needs.plan.outputs.torchvision }}
+          TORCHAUDIO: ${{ needs.plan.outputs.torchaudio }}
+          CU: ${{ needs.plan.outputs.cuda_variant }}
+          ARCHS: ${{ needs.plan.outputs.archs }}
+        run: |
+          (cd dist && sha256sum *.whl > SHA256SUMS && cat SHA256SUMS)
+          # what gladia-enterprise's bump (.github/scripts/vllm_cuda12_bump.py) installs the wheel on
+          jq -n --arg version "$VERSION" --arg local_version "$LOCAL" --arg torch "$TORCH" \
+            --arg torchvision "$TORCHVISION" --arg torchaudio "$TORCHAUDIO" --arg cuda_variant "$CU" \
+            --arg archs "$ARCHS" --arg recipe "${GITHUB_SHA}" '$ARGS.named' > dist/build.json
+          cat dist/build.json
+          notes="vLLM ${VERSION} (upstream tag v${VERSION}) built from source for CUDA 12 by gladia/build.sh at ${GITHUB_SHA::8}: torch ${TORCH}+${CU}, compute capabilities ${ARCHS}. Package version ${LOCAL}. Install it on torch==${TORCH} from https://download.pytorch.org/whl/${CU}."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.whl dist/SHA256SUMS dist/build.json --clobber
+          else
+            gh release create "$TAG" dist/*.whl dist/SHA256SUMS dist/build.json --target "$GITHUB_SHA" --title "$TAG" --notes "$notes"
+          fi
