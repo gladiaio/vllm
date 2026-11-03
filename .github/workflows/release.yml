@@ -193,7 +193,7 @@ jobs:
             --arg torchvision "$TORCHVISION" --arg torchaudio "$TORCHAUDIO" --arg cuda_variant "$CU" \
             --arg archs "$ARCHS" --arg recipe "${GITHUB_SHA}" '$ARGS.named' > dist/build.json
           cat dist/build.json
-          notes="vLLM ${VERSION} (upstream tag v${VERSION}) built from source for CUDA 12 by gladia/build.sh at ${GITHUB_SHA::8}: torch ${TORCH}+${CU}, compute capabilities ${ARCHS}. Package version ${LOCAL}. Install it on torch==${TORCH} from https://download.pytorch.org/whl/${CU}."
+          notes="vLLM ${VERSION} (upstream tag v${VERSION}) built from source for CUDA 12 by gladia/build.sh at ${GITHUB_SHA::8}, for gladia-enterprise's -cu128 images (NVIDIA driver >= 525): compiled against torch ${TORCH}+${CU} (the CUDA 12 build of the torch vLLM pins), compute capabilities ${ARCHS}, gladia/patch.py's changes for that toolkit. Package version ${LOCAL}. Install it on torch==${TORCH} from https://download.pytorch.org/whl/${CU}."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/*.whl dist/SHA256SUMS dist/build.json --clobber
           else

@@ -86,12 +86,14 @@ log "compile (MAX_JOBS=${MAX_JOBS}, NVCC_THREADS=${NVCC_THREADS})"
 cd "$SRC"
 rm -rf build  # a stale CMake cache keeps the previous compiler (ccache keeps the objects)
 git config --global --add safe.directory "$SRC" 2>/dev/null || true
-uv build --wheel --no-build-isolation --out-dir "$OUT/raw" .
-command -v ccache >/dev/null && ccache -s | sed -n '1,12p'
+# abi3 (cp38), as upstream's release wheel (docker/Dockerfile: bdist_wheel --py-limited-api=cp38)
+uv build --wheel --no-build-isolation --config-setting=--build-option=--py-limited-api=cp38 \
+  --out-dir "$OUT/raw" .
+if command -v ccache >/dev/null; then ccache -s || true; fi
 
 # Tag the platform by the glibc this was built on (ubuntu 24.04: 2.39), as manylinux, so resolvers
 # that require a manylinux tag accept it. Its CUDA libraries come from torch's own nvidia-* wheels.
-glibc="$(ldd --version | head -1 | grep -o '[0-9]*\.[0-9]*$' | tr . _)"
+glibc="$(ldd --version 2>&1 | sed -n '1s/.* \([0-9]*\)\.\([0-9]*\)$/\1_\2/p')"  # sed reads it all: no SIGPIPE
 for whl in "$OUT"/raw/*.whl; do
   (cd /tmp && uvx -q --from wheel==0.45.1 wheel tags --remove \
     --platform-tag "manylinux_${glibc}_x86_64" "$whl" >/dev/null)

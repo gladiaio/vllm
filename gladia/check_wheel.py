@@ -6,7 +6,7 @@
 Fails (exit 1, one line per problem) unless:
   - the wheel's file name and METADATA say <version>+<cuda variant>.gladia<rev>;
   - METADATA requires torch at exactly the version upstream pins (requirements/cuda.txt), and no
-    CUDA 13 package is left (no `[cu13]` extra, no `*-cu13` distribution): setup.py rewrites them
+    CUDA 13 package is left outside an optional extra (no `[cu13]` extra, no `*-cu13` distribution): setup.py rewrites them
     for a CUDA 12 torch, a wheel still asking for them would pull CUDA 13 into a CUDA 12 venv;
   - every compiled CUDA extension (`*.so` with device code) carries SASS for exactly the requested
     compute capabilities (a `+PTX` / `a` suffix aside), none for an architecture outside the list:
@@ -62,7 +62,9 @@ def check(args: argparse.Namespace) -> list[str]:
         torch = [r for r in requires if re.match(r"torch\s*[=<>!~]", r)]
         if torch != [f"torch=={args.torch}"]:
             problems.append(f"torch requirement {torch} != ['torch=={args.torch}']")
-        problems += [f"CUDA 13 requirement left: {r}" for r in requires if CU13.search(r)]
+        # an optional extra (`; extra == "deepstream"`) is installed only on request
+        base = [r for r in requires if "extra ==" not in r]
+        problems += [f"CUDA 13 requirement left: {r}" for r in base if CU13.search(r)]
         version_py = whl.read("vllm/_version.py").decode()
         if f"'{local}'" not in version_py and f'"{local}"' not in version_py:
             problems.append(f"vllm/_version.py does not hold {local}")

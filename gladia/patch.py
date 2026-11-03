@@ -17,6 +17,11 @@ at, never skipped silently.
    vllm-flash-attn commit v0.33.0 pins); upstream only builds it with CUDA 12.9 / 13 now. Below 12.8
    setup.py no longer asks for it (it already leaves it out below 12.3): vLLM's backend selection
    (`is_fa_version_supported(3)`) and solaria-4's then run FA2 on Hopper, from its compute_80 PTX.
+3. DeepGEMM (the FP8 block GEMMs of DeepSeek models) static_asserts CUDA_VERSION and
+   CUDART_VERSION >= 12.9 at the commit v0.33.0 vendors, while cmake/external_projects/deepgemm.cmake
+   still enables its sm90 build from 12.3. Below 12.9 it gets no architecture, so the cmake file
+   creates its empty `_deep_gemm_C` target, as it does on an unsupported GPU (vLLM's has_deep_gemm()
+   is then false).
 """
 
 from __future__ import annotations
@@ -69,9 +74,27 @@ def fa3(src: Path, nvcc: tuple[int, int]) -> str:
     return "fa3: left out below CUDA 12.8 (setup.py gate 12.3 -> 12.8; Hopper runs FA2)"
 
 
+DEEPGEMM_GATE = """if(${CMAKE_CUDA_COMPILER_VERSION} VERSION_GREATER_EQUAL 12.3)
+  list(APPEND DEEPGEMM_SUPPORT_ARCHS "9.0a")"""
+
+
+def deepgemm(src: Path, nvcc: tuple[int, int]) -> str:
+    if nvcc >= (12, 9):
+        return "deepgemm: CUDA >= 12.9, unchanged"
+    cmake = src / "cmake" / "external_projects" / "deepgemm.cmake"
+    text = cmake.read_text()
+    patched = DEEPGEMM_GATE.replace("EQUAL 12.3)", "EQUAL 12.9)")
+    if patched in text:
+        return "deepgemm: already left out below CUDA 12.9"
+    if DEEPGEMM_GATE not in text:
+        raise SystemExit("deepgemm: deepgemm.cmake's sm90 gate changed upstream: look at it again")
+    cmake.write_text(text.replace(DEEPGEMM_GATE, patched, 1))
+    return "deepgemm: left out below CUDA 12.9 (deepgemm.cmake sm90 gate 12.3 -> 12.9)"
+
+
 def main() -> int:
     src, nvcc = Path(sys.argv[1]), version(sys.argv[2])
-    for change in (cooperative_topk, fa3):
+    for change in (cooperative_topk, fa3, deepgemm):
         print(f"patch: {change(src, nvcc)}")
     return 0
 

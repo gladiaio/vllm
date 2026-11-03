@@ -23,10 +23,30 @@ images then run a fixed upstream version, and pip-audit / OSV see that version w
   package version is `<version>+<cuda variant>.gladia<REV>`, for example `0.33.0+cu126.gladia1`. It is a
   local version of the upstream release, so `vllm>=0.33.0` and the advisory scanners see 0.33.0.
 
+**Names.** The tag says the flavor it serves (`-gladia-cu128`: gladia-enterprise's `-cu128` images,
+NVIDIA driver >= 525). The package version says the CUDA it is compiled for (`+cu126`): torch 2.14.0, the
+exact torch that vLLM 0.33 pins, has no cu128 or cu129 build, so vLLM is compiled against torch's cu126 build
+with the CUDA 12.6 toolkit, and both share one CUDA runtime. A cu126 wheel runs on any CUDA 12 driver
+(>= 525), so it covers the whole `-cu128` flavor. When a later torch ships cu128 or cu129 again, `plan.sh`
+picks that build, and the version follows (`+cu128` / `+cu129`), with Blackwell in the arch list.
+
+**Platform.** The wheel is built in `nvidia/cuda:<toolkit>-cudnn-devel-ubuntu24.04` (GCC 13 is required)
+and tagged `manylinux_2_39` (glibc 2.39, Ubuntu 24.04), the glibc of the images it goes into (every
+gladia-enterprise CUDA base is ubuntu24.04). It is `cp38-abi3`, as upstream's wheel is.
+
+**What differs from upstream's source** (`gladia/patch.py`, only below the toolkit each needs; each change
+fails the build if upstream changes the text it edits):
+
+1. `cooperative_topk` (the DSA indexer's top-k: DeepSeek-V3.2 / V4, Qwen4-Exp) is left out below CUDA 12.8.
+   Its `cuda::ptx` calls need the CCCL of CUDA 12.8.
+2. FA3 (vllm-flash-attn's Hopper kernels) is left out below CUDA 12.8. nvcc 12.6.3 segfaults on one of
+   its instantiations. Hopper runs FA2 instead, as vLLM falls back to it.
+3. DeepGEMM is left out below CUDA 12.9. It static-asserts CUDA 12.9.
+
 Install it on the torch it was built against (pin the sha256 from `SHA256SUMS`):
 
     uv pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.14.0 torchvision==0.29.0 torchaudio==2.11.0
-    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.1/vllm-0.33.0%2Bcu126.gladia1-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=<SHA256SUMS>"
+    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.1/vllm-0.33.0%2Bcu126.gladia1-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=485bb50872a12453ab4e45206ff9c9f8ee522a66faeb6f5c057e620deb60b35a"
 
 Rebuild: bump `REV` in the workflow when `gladia/` changes, then run it
 (`gh workflow run release.yml -R gladiaio/vllm`, or `-f version=0.33.1`, or `-f force=true` to replace
