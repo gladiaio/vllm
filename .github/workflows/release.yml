@@ -20,6 +20,11 @@ on:
         type: boolean
         default: false
 
+# bash -eo pipefail: a failed script piped into tee fails its step
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: write
 
