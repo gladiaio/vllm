@@ -43,10 +43,15 @@ fails the build if upstream changes the text it edits):
    its instantiations. Hopper runs FA2 instead, as vLLM falls back to it.
 3. DeepGEMM is left out below CUDA 12.9. It static-asserts CUDA 12.9.
 
+**Provenance.** From `v0.33.0-gladia-cu128.2` on, every wheel carries a signed build provenance
+attestation from this workflow (GitHub artifact attestations, Sigstore). Check it before pinning:
+`gh attestation verify <wheel> -R gladiaio/vllm --signer-workflow gladiaio/vllm/.github/workflows/release.yml`.
+`v0.33.0-gladia-cu128.1` was built by hand with the same `gladia/build.sh` and has none: use `.2`.
+
 Install it on the torch it was built against (pin the sha256 from `SHA256SUMS`):
 
     uv pip install --index-url https://download.pytorch.org/whl/cu126 torch==2.14.0 torchvision==0.29.0 torchaudio==2.11.0
-    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.1/vllm-0.33.0%2Bcu126.gladia1-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=485bb50872a12453ab4e45206ff9c9f8ee522a66faeb6f5c057e620deb60b35a"
+    uv pip install "vllm @ https://github.com/gladiaio/vllm/releases/download/v0.33.0-gladia-cu128.2/vllm-0.33.0%2Bcu126.gladia2-cp38-abi3-manylinux_2_39_x86_64.whl#sha256=<SHA256SUMS>"
 
 Rebuild: bump `REV` in the workflow when `gladia/` changes, then run it
 (`gh workflow run release.yml -R gladiaio/vllm`, or `-f version=0.33.1`, or `-f force=true` to replace

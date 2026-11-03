@@ -29,7 +29,7 @@ permissions:
   contents: write
 
 env:
-  REV: "1"                 # bump when gladia/ changes: rebuilds the current upstream release
+  REV: "2"                 # bump when gladia/ changes: rebuilds the current upstream release
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
   PIP_AUDIT_VERSION: "2.10.1"
@@ -152,6 +152,10 @@ jobs:
     needs: [plan, build]
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write      # the build provenance attestation (Sigstore)
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -180,6 +184,12 @@ jobs:
           python3 -m venv /tmp/audit && /tmp/audit/bin/pip install -q "pip-audit==${PIP_AUDIT_VERSION}"
           echo "vllm==${VERSION}" > /tmp/vllm.txt
           /tmp/audit/bin/pip-audit --no-deps --disable-pip --vulnerability-service osv -r /tmp/vllm.txt
+      # signed SLSA build provenance of the wheel: this workflow, this commit, this run. Consumers
+      # check it before pinning (gh attestation verify <wheel> -R gladiaio/vllm
+      # --signer-workflow gladiaio/vllm/.github/workflows/release.yml)
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.whl
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
