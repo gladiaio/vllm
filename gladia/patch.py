@@ -22,6 +22,14 @@ at, never skipped silently.
    still enables its sm90 build from 12.3. Below 12.9 it gets no architecture, so the cmake file
    creates its empty `_deep_gemm_C` target, as it does on an unsupported GPU (vLLM's has_deep_gemm()
    is then false).
+4. Qwen3-ASR / Qwen3-Omni audio tower LoRA (`enable_tower_connector_lora`): the encoder runs
+   `conv_out`, a LoRA-wrapped linear, on the chunk-padded rows, while the tower's LoRA mapping
+   holds one row per valid position. A batch of clips whose lengths are not whole chunks crashes
+   at `lora_shrink_op.py` (`assert token_lora_mapping.size(0) == M`), or applies another row's
+   adapter when the counts happen to fit (vllm-project/vllm#61608). The valid rows are gathered
+   before `conv_out` and the positional embedding is taken at their positions: the same values
+   without a LoRA, the right ones with it (upstream's fix, open as vllm-project/vllm#63379, does
+   the same on main). Applied for every toolkit; skipped once upstream has the fix.
 """
 
 from __future__ import annotations
@@ -92,9 +100,64 @@ def deepgemm(src: Path, nvcc: tuple[int, int]) -> str:
     return "deepgemm: left out below CUDA 12.9 (deepgemm.cmake sm90 gate 12.3 -> 12.9)"
 
 
+QWEN3_AUDIO_FILE = Path("vllm") / "model_executor" / "models" / "qwen3_omni_moe_thinker.py"
+QWEN3_AUDIO_PADDED = """        b, c, f, t = padded_embed.size()
+        padded_embed = self.conv_out(
+            padded_embed.permute(0, 3, 1, 2).contiguous().view(b, t, c * f)
+        )
+
+        # Add positional embedding
+        positional_embedding = (
+            self.positional_embedding.positional_embedding[: padded_embed.shape[1], :]
+            .unsqueeze(0)
+            .to(padded_embed.dtype)
+        )
+        padded_embed = padded_embed + positional_embedding
+
+        with gpu_sync_allowed():
+            hidden_states = padded_embed[padded_mask_after_cnn]
+            # Use tolist() for efficient batch conversion from tensor to Python.
+            aftercnn_lens_list = aftercnn_lens.tolist()
+"""
+QWEN3_AUDIO_VALID = """        b, c, f, t = padded_embed.size()
+        padded_embed = padded_embed.permute(0, 3, 1, 2).contiguous().view(b, t, c * f)
+
+        # gladia: conv_out (LoRA-wrapped with enable_tower_connector_lora) projects the valid
+        # rows only, as the tower's LoRA mapping counts them (vllm-project/vllm#61608)
+        positions = torch.arange(t, device=padded_embed.device).expand(b, t)
+        with gpu_sync_allowed():
+            hidden_states = self.conv_out(padded_embed[padded_mask_after_cnn])
+            valid_positions = positions[padded_mask_after_cnn]
+            # Use tolist() for efficient batch conversion from tensor to Python.
+            aftercnn_lens_list = aftercnn_lens.tolist()
+        hidden_states = hidden_states + self.positional_embedding.positional_embedding[
+            valid_positions
+        ].to(hidden_states.dtype)
+"""
+# upstream's own fix (vllm-project/vllm#63379), once merged
+QWEN3_AUDIO_UPSTREAM = "# Tower LoRA mappings contain only valid rows, not chunk padding."
+
+
+def qwen3_audio_lora(src: Path, nvcc: tuple[int, int]) -> str:
+    del nvcc  # a correctness fix: every toolkit
+    path = src / QWEN3_AUDIO_FILE
+    text = path.read_text()
+    if QWEN3_AUDIO_UPSTREAM in text:
+        return "qwen3_audio_lora: upstream has the fix, unchanged"
+    if QWEN3_AUDIO_VALID in text:
+        return "qwen3_audio_lora: already applied"
+    if QWEN3_AUDIO_PADDED not in text:
+        raise SystemExit(
+            "qwen3_audio_lora: the Qwen3 audio encoder's conv_out block changed upstream: "
+            "look at it again"
+        )
+    path.write_text(text.replace(QWEN3_AUDIO_PADDED, QWEN3_AUDIO_VALID, 1))
+    return "qwen3_audio_lora: conv_out projects the valid rows only (tower LoRA mapping)"
+
+
 def main() -> int:
     src, nvcc = Path(sys.argv[1]), version(sys.argv[2])
-    for change in (cooperative_topk, fa3, deepgemm):
+    for change in (cooperative_topk, fa3, deepgemm, qwen3_audio_lora):
         print(f"patch: {change(src, nvcc)}")
     return 0
 
