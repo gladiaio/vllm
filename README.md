@@ -42,6 +42,11 @@ fails the build if upstream changes the text it edits):
 2. FA3 (vllm-flash-attn's Hopper kernels) is left out below CUDA 12.8. nvcc 12.6.3 segfaults on one of
    its instantiations. Hopper runs FA2 instead, as vLLM falls back to it.
 3. DeepGEMM is left out below CUDA 12.9. It static-asserts CUDA 12.9.
+4. Qwen3-ASR / Qwen3-Omni audio tower LoRA (`enable_tower_connector_lora`), every toolkit: the audio
+   encoder projects only the valid rows through `conv_out`, as the tower's LoRA mapping counts them.
+   Upstream runs it on the chunk-padded rows, which crashes a large batch of short clips and gives
+   other rows' adapters to a small one (vllm-project/vllm#61608). Skipped once upstream ships its
+   own fix (vllm-project/vllm#63379, open).
 
 **Provenance.** From `v0.33.0-gladia-cu128.2` on, every wheel carries a signed build provenance
 attestation from this workflow (GitHub artifact attestations, Sigstore). Check it before pinning:
