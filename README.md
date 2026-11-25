@@ -47,6 +47,11 @@ fails the build if upstream changes the text it edits):
    Upstream runs it on the chunk-padded rows, which crashes a large batch of short clips and gives
    other rows' adapters to a small one (vllm-project/vllm#61608). Skipped once upstream ships its
    own fix (vllm-project/vllm#63379, open).
+5. General plugins (`load_plugins_by_group`), every toolkit: a plugin that fails to load is logged as one
+   WARNING line (its exception's type and message) instead of an ERROR with its traceback, which a
+   JSON log pipeline splits into one entry per line (~46 ERROR entries per start for NeMo's
+   `nemo_speechlm` in gladia-enterprise, gladiaio/gladia-enterprise#6033); a plugin that `VLLM_PLUGINS`
+   leaves out is named in one WARNING line. The same plugins load as upstream.
 
 **Provenance.** From `v0.33.0-gladia-cu128.2` on, every wheel carries a signed build provenance
 attestation from this workflow (GitHub artifact attestations, Sigstore). Check it before pinning:
