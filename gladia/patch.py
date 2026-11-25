@@ -30,6 +30,12 @@ at, never skipped silently.
    before `conv_out` and the positional embedding is taken at their positions: the same values
    without a LoRA, the right ones with it (upstream's fix, open as vllm-project/vllm#63379, does
    the same on main). Applied for every toolkit; skipped once upstream has the fix.
+5. General plugins (vllm/plugins/__init__.py, load_plugins_by_group): a plugin that fails to load
+   is logged as one WARNING line, its exception's type and message, never an ERROR with its
+   traceback (one log entry per traceback line in a JSON log pipeline: ~46 ERROR entries per start
+   for NeMo's nemo_speechlm in gladia-enterprise, gladiaio/gladia-enterprise#6033); a plugin that
+   VLLM_PLUGINS leaves out is named in one WARNING line. Loading is unchanged: the same plugins
+   load, a failed one is still skipped. Applied for every toolkit.
 """
 
 from __future__ import annotations
@@ -155,9 +161,59 @@ def qwen3_audio_lora(src: Path, nvcc: tuple[int, int]) -> str:
     return "qwen3_audio_lora: conv_out projects the valid rows only (tower LoRA mapping)"
 
 
+PLUGINS_FILE = Path("vllm") / "plugins" / "__init__.py"
+PLUGINS_UPSTREAM = """    for plugin in discovered_plugins:
+        if allowed_plugins is None or plugin.name in allowed_plugins:
+            if allowed_plugins is not None:
+                log_level("Loading plugin %s", plugin.name)
+
+            try:
+                func = plugin.load()
+                plugins[plugin.name] = func
+            except Exception:
+                logger.exception("Failed to load plugin %s", plugin.name)
+"""
+PLUGINS_ONE_LINE = """    for plugin in discovered_plugins:
+        if allowed_plugins is None or plugin.name in allowed_plugins:
+            if allowed_plugins is not None:
+                log_level("Loading plugin %s", plugin.name)
+
+            # gladia: one WARNING line, never an ERROR traceback (one log entry per line)
+            try:
+                func = plugin.load()
+                plugins[plugin.name] = func
+            except Exception as e:
+                logger.warning(
+                    "Failed to load plugin %s (%s): %s: %s",
+                    plugin.name,
+                    plugin.value,
+                    type(e).__name__,
+                    e,
+                )
+        else:
+            logger.warning(
+                "Plugin %s (%s) skipped: not in VLLM_PLUGINS", plugin.name, plugin.value
+            )
+"""
+
+
+def plugin_log_lines(src: Path, nvcc: tuple[int, int]) -> str:
+    del nvcc  # a logging change: every toolkit
+    path = src / PLUGINS_FILE
+    text = path.read_text()
+    if PLUGINS_ONE_LINE in text:
+        return "plugin_log_lines: already applied"
+    if PLUGINS_UPSTREAM not in text:
+        raise SystemExit(
+            "plugin_log_lines: load_plugins_by_group changed upstream: look at it again"
+        )
+    path.write_text(text.replace(PLUGINS_UPSTREAM, PLUGINS_ONE_LINE, 1))
+    return "plugin_log_lines: a failed or skipped plugin is one WARNING line"
+
+
 def main() -> int:
     src, nvcc = Path(sys.argv[1]), version(sys.argv[2])
-    for change in (cooperative_topk, fa3, deepgemm, qwen3_audio_lora):
+    for change in (cooperative_topk, fa3, deepgemm, qwen3_audio_lora, plugin_log_lines):
         print(f"patch: {change(src, nvcc)}")
     return 0
 

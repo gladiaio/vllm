@@ -29,7 +29,7 @@ permissions:
   contents: write
 
 env:
-  REV: "3"                 # bump when gladia/ changes: rebuilds the current upstream release
+  REV: "4"                 # bump when gladia/ changes: rebuilds the current upstream release
   TRIVY_VERSION: "0.75.0"
   TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
   PIP_AUDIT_VERSION: "2.10.1"
